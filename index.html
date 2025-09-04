@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Task Manager + Alfred</title>
+  <style>
+    :root{
+      --bg-top:#0b0f2a; --bg-mid1:#24143a; --bg-mid2:#4a1b3d; --bg-mid3:#731e32;
+      --bg-bot1:#c13d1c; --bg-bot2:#ff6a00;
+      --panel: rgba(9, 8, 20, 0.45); --panel-border: rgba(255,255,255,0.10);
+      --ink:#f6eff8; --muted:#d7cbe0;
+      --accent:#ff8bd1; --accent-d:#ff5fae;
+      --green:#22c55e; --red:#ef4444;
+      --shadow: rgba(0,0,0,0.45); --radius:14px;
+      --prio-low:#6ba7ff; --prio-norm:#2dd4ff; --prio-high:#ff8bd1;
+      --chip-bg:rgba(255,255,255,.06); --chip-br:rgba(255,255,255,.18);
+      --overdue:#ffb4b4; --due-soon:#ffd59a;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:linear-gradient(180deg,
+        var(--bg-top) 0%,var(--bg-mid1) 22%,var(--bg-mid2) 45%,
+        var(--bg-mid3) 62%,var(--bg-bot1) 82%,var(--bg-bot2) 100%);
+      color:var(--ink); font:15px/1.5 system-ui, Segoe UI, Roboto;
+      min-height:100vh; padding:24px; display:grid; place-items:center;
+    }
+    .app{width:min(1100px,96vw); background:transparent; border-radius:18px; padding:22px}
+    header{
+      display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;
+      background:rgba(3,5,14,.35); border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:10px 14px;
+    }
+    h1{margin:0; font-size:22px; color:var(--ink); letter-spacing:.3px;
+       text-shadow:0 1px 0 rgba(255,255,255,.15), 0 0 18px color-mix(in srgb, var(--accent) 55%, transparent)}
+    .toolbar{display:flex; gap:8px; align-items:center}
+    .mode{font-size:12px; color:var(--muted); padding:6px 10px; border:1px solid rgba(255,255,255,.12); border-radius:999px}
+    .btn{padding:10px 14px; border:0; border-radius:10px; cursor:pointer; color:white}
+    .btn-refresh{background:linear-gradient(180deg, var(--accent), var(--accent-d))}
+    .grid{display:grid; grid-template-columns:1fr 420px; gap:18px}
+    .panel{background:var(--panel); border:1px solid var(--panel-border); border-radius:16px; padding:16px;
+           box-shadow:0 10px 30px var(--shadow); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px)}
+    .title{font-weight:800; margin:0 0 12px 0; color:var(--ink); font-size:20px;
+           text-shadow:0 0 14px color-mix(in srgb, var(--accent) 45%, transparent)}
+    .filters{display:flex; gap:10px; margin-bottom:10px; flex-wrap:wrap}
+    .search{flex:1; display:flex; gap:8px}
+    input,select{background:rgba(15,14,22,.6); border:1px solid rgba(255,255,255,.12); color:var(--ink);
+                 border-radius:10px; padding:10px 12px; outline:0}
+    .quick{display:flex; gap:8px; align-items:center}
+    .chip{background:var(--chip-bg); border:1px solid var(--chip-br); color:var(--ink);
+          padding:6px 10px; border-radius:999px; font-size:12px; cursor:pointer; user-select:none}
+    .chip.active{outline:2px solid var(--accent)}
+    .list{display:grid; gap:10px; max-height:420px; overflow:auto; margin-top:10px}
+    .card{background:rgba(15,10,22,.55); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px;
+          display:grid; grid-template-columns:auto 1fr auto auto auto; gap:10px; align-items:center}
+    .handle{cursor:grab; user-select:none; color:#a1b0c6}
+    .desc{font-weight:600}
+    .desc.done{text-decoration:line-through; color:var(--muted)}
+    .pill{border-radius:10px; padding:8px 10px; border:0}
+    .pill-green{background:rgba(34,197,94,.18); border:1px solid rgba(34,197,94,.45); color:#d9ffe8}
+    .pill-red{background:rgba(239,68,68,.20); border:1px solid rgba(239,68,68,.50); color:#ffe1e1}
+    .prio{padding:6px 10px; border-radius:999px; font-size:12px; border:1px solid var(--chip-br); background:var(--chip-bg); cursor:pointer}
+    .prio.low{color:#6ba7ff} .prio.norm{color:#2dd4ff} .prio.high{color:#ff8bd1}
+    .due{font-size:12px; color:var(--muted)}
+    .due.overdue{color:#ffb4b4} .due.soon{color:#ffd59a}
+    .addrow{display:grid; grid-template-columns:1fr auto auto auto; gap:10px; margin-top:12px}
+    .btn-add{background:linear-gradient(180deg, var(--accent), var(--accent-d))}
+    .btn-small{padding:8px 10px; font-size:12px; background:rgba(255,255,255,.08)}
+    .chatlog{max-height:460px; overflow:auto; display:grid; gap:8px}
+    .bubble{background:rgba(15,10,22,.55); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px 12px; white-space:pre-wrap}
+    .you{color:#c8dcff} .ai{color:#ffd6ea}
+    .sendrow{display:grid; grid-template-columns:1fr auto; gap:10px; margin-top:10px}
+    .btn-send{background:linear-gradient(180deg,#22c55e,#16a34a)}
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div><h1>Task Manager</h1></div>
+      <div class="toolbar">
+        <span id="modeBadge" class="mode">mode: …</span>
+        <button id="refreshBtn" class="btn btn-refresh" type="button">↻ Refresh</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="panel">
+        <h2 class="title">Task Manager</h2>
+        <div class="filters">
+          <div class="search" style="flex:1">
+            <input id="searchInput" type="text" placeholder='New task accepts NL dates: "pay rent next Friday 9am"' />
+          </div>
+          <select id="filterSelect"><option value="all">All</option><option value="active">Active</option><option value="completed">Completed</option></select>
+          <select id="sortSelect"><option value="manual">Manual</option><option value="newest">Newest</option><option value="oldest">Oldest</option></select>
+          <div class="quick"><span class="chip" id="chipToday">Due Today</span><span class="chip" id="chipWeek">This Week</span></div>
+        </div>
+        <div id="taskList" class="list" aria-live="polite"></div>
+        <div class="addrow">
+          <input id="taskInput" type="text" placeholder='Add task… e.g., "call mom tomorrow 5pm" or "submit report next Tue"' />
+          <select id="prioritySelect"><option value="2">Normal</option><option value="3">High</option><option value="1">Low</option></select>
+          <button id="addBtn" class="btn btn-add" type="button">Add Task</button>
+          <button id="completeAllBtn" class="btn btn-small" type="button">Complete All</button>
+          <button id="deleteAllBtn" class="btn btn-small" type="button">Delete All</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 class="title">Alfred</h2>
+        <div id="chatLog" class="chatlog"></div>
+        <div class="sendrow">
+          <input id="chatInput" type="text" placeholder='Ask for a recipe, then reply "yes" to add groceries' />
+          <button id="sendBtn" class="btn btn-send" type="button">Send</button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const $ = (s)=>document.querySelector(s);
+    const api = {
+      async list(){ const r=await fetch('/api/tasks?ts='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('Load failed'); return r.json(); },
+      async add(dueText, desc, prio){
+        const body = { description: desc, priority: prio };
+        if (dueText && dueText.trim()) body.due = dueText;
+        const r=await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        if(!r.ok) throw new Error('Add failed'); return r.json();
+      },
+      async update(id, payload){
+        const r=await fetch(`/api/tasks/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        if(!r.ok) throw new Error('Update failed'); return r.json();
+      },
+      async complete(id){ const r=await fetch(`/api/tasks/${id}/complete`,{method:'PATCH'}); if(!r.ok) throw new Error('Complete failed'); return r.json(); },
+      async remove(id){ const r=await fetch(`/api/tasks/${id}`,{method:'DELETE'}); if(!r.ok && r.status!==204) throw new Error('Delete failed'); return true; },
+      async reorder(ids){ const r=await fetch('/api/tasks/reorder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order:ids})}); if(!r.ok) throw new Error('Reorder failed'); return r.json(); },
+      async completeAll(){ const r=await fetch('/api/tasks/complete_all',{method:'POST'}); if(!r.ok) throw new Error('Complete-all failed'); return r.json(); },
+      async deleteAll(){ const r=await fetch('/api/tasks/delete_all',{method:'DELETE'}); if(!r.ok) throw new Error('Delete-all failed'); return r.json(); },
+      async chat(message, execute=true, history=[]){
+        const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,execute,history})});
+        const data=await r.json(); if(!r.ok) throw new Error(data.error||'Assistant error'); return data;
+      },
+      async mode(){ const r=await fetch('/api/mode',{cache:'no-store'}); return r.json(); }
+    };
+
+    let tasks = [];
+    const state = { search:'', filter:'all', sort:'manual', dueFilter:'all' };
+
+    const chatHistory = []; // [{role:'user'|'assistant', content:'...'}]
+
+    const startOfToday = ()=>{ const d=new Date(); d.setHours(0,0,0,0); return d; };
+    const endOfToday = ()=>{ const d=new Date(); d.setHours(23,59,59,999); return d; };
+    const startOfWeek = ()=>{ const d=new Date(); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0); return d; };
+    const endOfWeek = ()=>{ const d=startOfWeek(); d.setDate(d.getDate()+6); d.setHours(23,59,59,999); return d; };
+
+    function applyFilters(items){
+      let out = items.slice();
+      if(state.search){
+        const q=state.search.toLowerCase();
+        out = out.filter(t=>t.description.toLowerCase().includes(q));
+      }
+      if(state.filter==='active') out = out.filter(t=>!t.completed);
+      if(state.filter==='completed') out = out.filter(t=>t.completed);
+      if(state.dueFilter==='today'){
+        const s=startOfToday().getTime()/1000, e=endOfToday().getTime()/1000;
+        out = out.filter(t=>t.due_at && t.due_at>=s && t.due_at<=e);
+      } else if(state.dueFilter==='week'){
+        const s=startOfWeek().getTime()/1000, e=endOfWeek().getTime()/1000;
+        out = out.filter(t=>t.due_at && t.due_at>=s && t.due_at<=e);
+      }
+      if(state.sort==='newest') out.sort((a,b)=> b.created_at - a.created_at);
+      else if(state.sort==='oldest') out.sort((a,b)=> a.created_at - b.created_at);
+      return out;
+    }
+
+    function formatDue(ts){
+      if(!ts) return '';
+      const d=new Date(ts*1000);
+      const today = startOfToday(), tomorrow = new Date(today); tomorrow.setDate(today.getDate()+1);
+      const sameDay = (x,y)=> x.getFullYear()===y.getFullYear() && x.getMonth()===y.getMonth() && x.getDate()===y.getDate();
+      const opts = { weekday:'short', month:'short', day:'numeric' };
+      if (sameDay(d, today)) return 'Today ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      if (sameDay(d, tomorrow)) return 'Tomorrow ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      return d.toLocaleDateString([], opts) + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    }
+    function dueClass(ts){
+      if(!ts) return '';
+      const now=Date.now()/1000;
+      if(ts < now) return 'overdue';
+      if(ts - now < 48*3600) return 'soon';
+      return '';
+    }
+
+    function enableDnD(card){
+      const canDrag = (state.sort === 'manual' && !state.search && state.filter==='all' && state.dueFilter==='all');
+      card.draggable = canDrag;
+      if(!canDrag) return;
+      card.addEventListener('dragstart', (e)=>{ card.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
+      card.addEventListener('dragend', async ()=>{
+        card.classList.remove('dragging');
+        const ids = [...$('#taskList').children].map(el => +el.dataset.id);
+        try{ await api.reorder(ids); }catch(e){ console.error(e); }
+        await load();
+      });
+      card.addEventListener('dragover', (e)=>{
+        e.preventDefault();
+        const list = $('#taskList');
+        const draggingEl = list.querySelector('.dragging');
+        const target = e.currentTarget;
+        if(!draggingEl || draggingEl === target) return;
+        const rect = target.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height/2;
+        if(before) list.insertBefore(draggingEl, target);
+        else list.insertBefore(draggingEl, target.nextSibling);
+      });
+    }
+
+    function render(){
+      const list = $('#taskList'); list.innerHTML='';
+      const frag=document.createDocumentFragment();
+      for(const t of applyFilters(tasks)){
+        const card=document.createElement('div'); card.className='card'; card.dataset.id = t.id;
+        const handle=document.createElement('div'); handle.className='handle'; handle.textContent='⋮⋮';
+        const desc=document.createElement('div'); desc.className='desc'+(t.completed?' done':''); desc.textContent=t.description;
+        const due=document.createElement('div'); due.className='due '+dueClass(t.due_at); due.textContent = t.due_at ? ('Due: '+formatDue(t.due_at)) : '';
+        const meta=document.createElement('div'); meta.style.display='grid'; meta.style.gap='4px';
+        meta.appendChild(desc); if (t.due_at) meta.appendChild(due);
+        const pr=document.createElement('button'); pr.className='prio'; pr.type='button';
+        const setPrio=(p)=>{
+          pr.textContent = p===3?'High':p===1?'Low':'Normal';
+          pr.classList.remove('low','norm','high');
+          pr.classList.add(p===3?'high':p===1?'low':'norm');
+        };
+        setPrio(t.priority);
+        pr.addEventListener('click', async ()=>{
+          const next = t.priority===1?2 : t.priority===2?3 : 1;
+          try{ await api.update(t.id, { priority: next }); t.priority = next; setPrio(next); } catch(e){ alert(e.message); }
+        });
+        const completeBtn=document.createElement('button'); completeBtn.className='pill pill-green'; completeBtn.textContent='✓'; completeBtn.title='Complete'; completeBtn.type='button';
+        completeBtn.disabled=t.completed;
+        completeBtn.addEventListener('click', async ()=>{ if(!t.completed){ await api.complete(t.id); await load(); }});
+        const delBtn=document.createElement('button'); delBtn.className='pill pill-red'; delBtn.textContent='🗑'; delBtn.title='Delete'; delBtn.type='button';
+        delBtn.addEventListener('click', async ()=>{ await api.remove(t.id); await load(); });
+        card.appendChild(handle); card.appendChild(meta); card.appendChild(pr); card.appendChild(completeBtn); card.appendChild(delBtn);
+        enableDnD(card);
+        frag.appendChild(card);
+      }
+      list.appendChild(frag);
+    }
+
+    async function load(){ tasks = await api.list(); render(); }
+
+    function addBubble(text, who='you'){
+      const n=document.createElement('div'); n.className='bubble '+(who==='you'?'you':'ai'); n.textContent=(who==='you'?'You: ':'AI: ')+text;
+      $('#chatLog').appendChild(n); $('#chatLog').scrollTop = $('#chatLog').scrollHeight;
+    }
+
+    async function sendChat(){
+      const input=$('#chatInput'); const msg=input.value.trim(); if(!msg) return;
+      addBubble(msg,'you'); chatHistory.push({role:'user', content: msg}); input.value='';
+      try{
+        const data=await api.chat(msg,true,chatHistory);
+        if(data.reply){ addBubble(data.reply,'ai'); chatHistory.push({role:'assistant', content: data.reply}); }
+        if(data.executed && data.decision){
+          addBubble(`executed: ${Array.isArray(data.decision)? data.decision.map(d=>d.function).join(', ') : data.decision.function}`,'ai');
+          chatHistory.push({role:'assistant', content: `Executed ${JSON.stringify(data.decision)}`});
+        }
+        await load(); await setModeBadge();
+      }catch(e){ addBubble(`error: ${e.message}`,'ai'); chatHistory.push({role:'assistant', content: `Error: ${e.message}`}); }
+    }
+
+    async function addFromInput(){
+      const input=$('#taskInput'); const text=input.value.trim(); if(!text) return;
+      const prio = +$('#prioritySelect').value || 2;
+      await api.add(text, text, prio); input.value=''; await load();
+    }
+
+    async function setModeBadge(){
+      try{ const info=await api.mode(); $('#modeBadge').textContent = info.model?`mode: ${info.mode} (${info.model})`:`mode: ${info.mode}`; }
+      catch{ $('#modeBadge').textContent='mode: …'; }
+    }
+
+    $('#addBtn').addEventListener('click', addFromInput);
+    $('#taskInput').addEventListener('keydown', e=>{ if(e.key==='Enter') addFromInput(); });
+    $('#sendBtn').addEventListener('click', sendChat);
+    $('#chatInput').addEventListener('keydown', e=>{ if(e.key==='Enter') sendChat(); });
+    $('#refreshBtn').addEventListener('click', async (e)=>{ e.preventDefault(); await setModeBadge(); await load(); });
+    $('#searchInput').addEventListener('input', e=>{ state.search = e.target.value; render(); });
+    $('#filterSelect').addEventListener('change', e=>{ state.filter = e.target.value; render(); });
+    $('#sortSelect').addEventListener('change', e=>{ state.sort = e.target.value; render(); });
+
+    const chipToday = $('#chipToday'), chipWeek = $('#chipWeek');
+    function setDueFilter(mode){
+      state.dueFilter = mode;
+      chipToday.classList.toggle('active', mode==='today');
+      chipWeek.classList.toggle('active', mode==='week');
+      render();
+    }
+    chipToday.addEventListener('click', ()=> setDueFilter(state.dueFilter==='today'?'all':'today'));
+    chipWeek.addEventListener('click', ()=> setDueFilter(state.dueFilter==='week'?'all':'week'));
+
+    $('#completeAllBtn').addEventListener('click', async ()=>{ await api.completeAll(); await load(); });
+    $('#deleteAllBtn').addEventListener('click', async ()=>{ if(confirm('Delete ALL tasks?')){ await api.deleteAll(); await load(); } });
+
+    setModeBadge(); load();
+  </script>
+</body>
+</html>
